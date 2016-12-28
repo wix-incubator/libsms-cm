@@ -22,8 +22,6 @@ class CmSmsGateway(requestFactory: HttpRequestFactory,
                    credentials: Credentials) extends SmsGateway {
   private val messagesParser = new MessagesParser
 
-  override def getId: String = CmSmsGateway.id
-
   override def sendPlain(sender: Sender, destPhone: String, text: String): Try[String] = {
     Try {
       val messages = CmHelper.createMessages(
@@ -59,6 +57,10 @@ class CmSmsGateway(requestFactory: HttpRequestFactory,
     }
   }
 
+  override def sendUnicode(sender: Sender, destPhone: String, text: String): Try[String] = {
+    ???
+  }
+
   private def extractAndCloseResponse(httpResponse: HttpResponse): String = {
     try {
       httpResponse.parseAsString()
@@ -66,8 +68,4 @@ class CmSmsGateway(requestFactory: HttpRequestFactory,
       httpResponse.ignore()
     }
   }
-}
-
-object CmSmsGateway {
-  val id = "com.cmtelecom"
 }
