@@ -1,25 +1,34 @@
 package com.wix.sms.cm.testkit
 
-import com.wix.hoopoe.http.testkit.EmbeddedHttpProbe
+import java.util.concurrent.atomic.AtomicReference
+
+import akka.http.scaladsl.model._
+import com.wix.e2e.http.RequestHandler
+import com.wix.e2e.http.client.extractors.HttpMessageExtractors._
+import com.wix.e2e.http.server.WebServerFactory.aMockWebServerWith
 import com.wix.sms.cm.model.MessagesParser
 import com.wix.sms.cm.{CmHelper, Credentials}
 import com.wix.sms.model.Sender
-import spray.http._
 
 class CmDriver(port: Int) {
-  private val probe = new EmbeddedHttpProbe(port, EmbeddedHttpProbe.NotFoundHandler)
+  private val delegatingHandler: RequestHandler = { case r: HttpRequest => handler.get().apply(r) }
+  private val notFoundHandler: RequestHandler = { case _: HttpRequest => HttpResponse(status = StatusCodes.NotFound) }
+
+  private val handler = new AtomicReference(notFoundHandler)
+
+  private val probe = aMockWebServerWith(delegatingHandler).onPort(port).build
   private val messagesParser = new MessagesParser
 
   def startProbe() {
-    probe.doStart()
+    probe.start()
   }
 
   def stopProbe() {
-    probe.doStop()
+    probe.stop()
   }
 
   def resetProbe() {
-    probe.handlers.clear()
+    handler.set(notFoundHandler)
   }
 
   def aMessageFor(credentials: Credentials, sender: Sender, destPhone: String, text: String): MessageCtx = {
@@ -29,6 +38,9 @@ class CmDriver(port: Int) {
       destPhone = destPhone,
       text = text)
   }
+
+  private def prependHandler(handle: RequestHandler) =
+    handler.set(handle orElse handler.get())
 
   class MessageCtx(credentials: Credentials, sender: Sender, destPhone: String, text: String) {
     private val expectedMessages = CmHelper.createMessages(
@@ -51,7 +63,7 @@ class CmDriver(port: Int) {
     }
 
     private def returnsText(responseText: String): Unit = {
-      probe.handlers += {
+      prependHandler({
         case HttpRequest(
         HttpMethods.POST,
         Uri.Path("/"),
@@ -60,12 +72,12 @@ class CmDriver(port: Int) {
         _) if isStubbedRequestEntity(entity) =>
           HttpResponse(
             status = StatusCodes.OK,
-            entity = HttpEntity(MediaTypes.`text/plain`, responseText))
-      }
+            entity = HttpEntity(ContentTypes.`text/plain(UTF-8)`, responseText))
+      })
     }
 
     private def isStubbedRequestEntity(entity: HttpEntity): Boolean = {
-      val requestXml = entity.asString
+      val requestXml = entity.extractAsString
       val messages = messagesParser.parse(requestXml)
 
       messages == expectedMessages
